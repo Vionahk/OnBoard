@@ -124,8 +124,7 @@ This ensures users understand:
 -  AI **never generates or modifies** official policies
 -  Official policies remain the **single source of truth**
 
-## 📁 Project Structure
-
+##  Project Structure
 ```
 KingHack/
 ├── app.py                 # Flask backend with routes and data
@@ -137,7 +136,7 @@ KingHack/
 └── README.md             # This file
 ```
 
-## 🎯 API Endpoints
+##  API Endpoints
 
 The application provides REST API endpoints for flexibility:
 
@@ -147,7 +146,7 @@ The application provides REST API endpoints for flexibility:
 - `GET /api/insights/<card_id>` - Fetch AI insights for a card
 - `GET /api/related/<card_id>` - Fetch related cards for a card
 
-## 🎨 Design Highlights
+##  Design Highlights
 
 - **Color Scheme**: Modern purple gradient (#667eea to #764ba2)
 - **Typography**: System fonts for fast loading and clarity
@@ -161,7 +160,7 @@ The application provides REST API endpoints for flexibility:
 - **Tablet** (768px-1200px): 2-3 column responsive grid
 - **Mobile** (<768px): Single column layout
 
-## ⚙️ Customization
+##  Customization
 
 ### Add New Cards
 
@@ -172,7 +171,6 @@ Edit `app.py` and add to the `ONBOARDING_BOARD` dictionary:
     {
         "id": "unique_id",
         "title": "Card Title",
-        "icon": "🎯",
         "content": "Your content here...",
         "section": "Your New Section"
     }
@@ -199,7 +197,7 @@ Edit `static/style.css` to change:
 - Spacing and sizing
 - Animations and transitions
 
-## 🔒 Security & Privacy Notes
+##  Security & Privacy Notes
 
 - **No User Data**: The app stores no user information or interactions
 - **No Databases**: Pure static content with no persistence
@@ -207,7 +205,7 @@ Edit `static/style.css` to change:
 - **No Authentication**: Designed for demo/development use
 - **Recommended for Production**: Add authentication, logging, and proper AI API integration
 
-## 🧪 Testing
+##  Testing
 
 Simply click through the cards and AI insights to verify:
 1.  All cards display correctly
@@ -217,7 +215,7 @@ Simply click through the cards and AI insights to verify:
 5.  Close button (✕) hides the insights panel
 6.  ESC key closes all open insights panels
 
-## 📝 Notes
+##  Notes
 
 - The application auto-loads the board on startup
 - All onboarding content is pre-written and official
@@ -225,7 +223,7 @@ Simply click through the cards and AI insights to verify:
 - The design prioritizes clarity, speed, and usability
 - Perfect for demos, presentations, and quick rollouts
 
-## 🎓 Learning Experience
+##  Learning Experience
 
 The application supports multiple learning styles:
 - **Visual Learners**: Icons, colors, and layout help scanning
@@ -245,7 +243,7 @@ The application supports multiple learning styles:
 - Multilingual support
 - Accessibility improvements (WCAG 2.1 AA)
 
-## 📞 Support
+##  Support
 
 For questions or issues:
 1. Check the code comments in `app.py`, `index.html`, and `script.js`
@@ -262,3 +260,4 @@ Free to use and customize for educational and internal training purposes.
 **Built with for effective, responsible AI-assisted employee onboarding**
 
  **Welcome to the team!** 
+
