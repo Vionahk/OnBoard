@@ -1,0 +1,1620 @@
+"""
+AI-Enhanced Employee Onboarding Application with Backboard API Integration
+Uses Backboard API for real, memory-enabled AI-assisted learning
+"""
+from flask import Flask, render_template, jsonify, request, session
+import json
+from datetime import datetime
+import requests
+import os
+import sqlite3
+from functools import lru_cache
+
+app = Flask(__name__)
+
+# Session cookie security defaults: keep credentials out of client-visible logs and
+# make cookies HttpOnly. In production set FLASK_ENV=production to enable Secure flag.
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax'
+)
+if os.getenv('FLASK_ENV') == 'production':
+    app.config['SESSION_COOKIE_SECURE'] = True
+else:
+    # In local development over HTTP, keep Secure=False so cookies work locally.
+    app.config['SESSION_COOKIE_SECURE'] = False
+
+# Persistence: SQLite DB for user_stats
+DB_PATH = os.path.join(os.path.dirname(__file__), 'onboard.db')
+
+def get_db_conn():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    try:
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                data TEXT,
+                updated TEXT
+            )
+        ''')
+        conn.commit()
+    except Exception as e:
+        print('DB init error:', e)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+def save_user_stats(username: str):
+    try:
+        init_db()
+        conn = get_db_conn()
+        cur = conn.cursor()
+        data = json.dumps(user_stats.get(username, {}))
+        cur.execute('INSERT OR REPLACE INTO users (username, data, updated) VALUES (?, ?, ?)', (username, data, datetime.now().isoformat()))
+        conn.commit()
+    except Exception as e:
+        print('Error saving user_stats for', username, e)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+def load_all_user_stats():
+    try:
+        init_db()
+        conn = get_db_conn()
+        cur = conn.cursor()
+        cur.execute('SELECT username, data FROM users')
+        rows = cur.fetchall()
+        for r in rows:
+            try:
+                user_stats[r['username']] = json.loads(r['data'])
+            except Exception:
+                user_stats[r['username']] = {}
+    except Exception as e:
+        print('Error loading user_stats:', e)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+def initialize_backboard_api():
+    """Create assistant and a global thread for demo use if configured."""
+    global assistant_id, thread_id, backboard_api_ready
+    if not BACKBOARD_CONFIG.get('enabled') or not AI_CONFIG.get('use_backboard_api'):
+        backboard_api_ready = False
+        return False
+
+    api_key = BACKBOARD_CONFIG.get('api_key')
+    if not api_key or api_key == 'your_api_key_here':
+        backboard_api_ready = False
+        return False
+
+    try:
+        headers = {"X-API-Key": api_key}
+        base_url = BACKBOARD_CONFIG.get('base_url')
+
+        resp = requests.post(f"{base_url}/assistants", json={
+            "name": AI_ASSISTANT_CONFIG.get('name', 'Assistant'),
+            "system_prompt": AI_ASSISTANT_CONFIG.get('system_prompt', '')
+        }, headers=headers, timeout=BACKBOARD_CONFIG.get('timeout', 30))
+
+        if resp.status_code == 200:
+            assistant_id = resp.json().get('assistant_id')
+        else:
+            backboard_api_ready = False
+            return False
+
+        resp = requests.post(f"{base_url}/assistants/{assistant_id}/threads", json={}, headers=headers, timeout=BACKBOARD_CONFIG.get('timeout', 30))
+        if resp.status_code == 200:
+            thread_id = resp.json().get('thread_id')
+            backboard_api_ready = True
+            return True
+    except Exception as e:
+        print('Backboard init error:', e)
+    backboard_api_ready = False
+    return False
+
+
+
+# Load configuration (includes DEMO_USER and MEMORY_OPTIONS)
+try:
+    from config import (
+        APP_CONFIG, UI_CONFIG, BACKBOARD_CONFIG, 
+        AI_ASSISTANT_CONFIG, AI_CONFIG, MESSAGES,
+        DEMO_USER, MEMORY_OPTIONS
+    )
+except ImportError:
+    # Fallback configuration if config.py is not available
+    APP_CONFIG = {'app_name': 'Onboarding', 'version': '1.0'}
+    BACKBOARD_CONFIG = {'enabled': False, 'api_key': '', 'base_url': 'https://app.backboard.io/api', 'timeout': 30}
+    AI_ASSISTANT_CONFIG = {'name': 'Assistant', 'system_prompt': 'You are helpful.', 'enable_memory': True}
+    AI_CONFIG = {'use_backboard_api': False}
+    MESSAGES = {}
+    DEMO_USER = {'username': 'KingHack', 'password': '12345'}
+    MEMORY_OPTIONS = {'default_mode': 'Auto', 'record_mistakes': True, 'record_preferred_techniques': True}
+
+# Application secret (used for session cookies). Replace in production.
+app.secret_key = os.getenv('APP_SECRET', 'dev_local_secret')
+
+# Global variables for Backboard API
+assistant_id = None
+thread_id = None
+backboard_api_ready = False
+
+# Per-user thread mapping and simple stats for demo
+"""
+AI-Enhanced Employee Onboarding Application with Backboard API Integration
+Uses Backboard API for real, memory-enabled AI-assisted learning
+"""
+from flask import Flask, render_template, jsonify, request, session
+import json
+from datetime import datetime
+import requests
+import os
+
+app = Flask(__name__)
+
+# Load configuration (includes DEMO_USER and MEMORY_OPTIONS)
+try:
+    from config import (
+        APP_CONFIG, UI_CONFIG, BACKBOARD_CONFIG,
+        AI_ASSISTANT_CONFIG, AI_CONFIG, MESSAGES,
+        DEMO_USER, MEMORY_OPTIONS
+    )
+except Exception:
+    APP_CONFIG = {'app_name': 'Onboarding', 'version': '1.0'}
+    BACKBOARD_CONFIG = {'enabled': False, 'api_key': '', 'base_url': 'https://app.backboard.io/api', 'timeout': 30}
+    AI_ASSISTANT_CONFIG = {'name': 'Assistant', 'system_prompt': 'You are helpful.', 'enable_memory': True}
+    AI_CONFIG = {'use_backboard_api': False}
+    MESSAGES = {}
+    DEMO_USER = {'username': 'KingHack', 'password': '12345'}
+    MEMORY_OPTIONS = {'default_mode': 'Auto', 'record_mistakes': True, 'record_preferred_techniques': True}
+
+# Application secret (used for session cookies). Replace in production.
+app.secret_key = os.getenv('APP_SECRET', 'dev_local_secret')
+
+# Backboard globals
+assistant_id = None
+thread_id = None
+backboard_api_ready = False
+
+# Per-user demo state
+user_threads = {}
+user_stats = {}
+
+# Onboarding board (clean, ASCII-safe)
+ONBOARDING_BOARD = {
+    "Welcome & Basics": [
+        {
+            "id": "overview",
+            "title": "Company Overview",
+            "icon": "🏢",
+            "content": "Our company is a leading technology innovator focused on delivering cutting-edge solutions to enterprise clients worldwide. Founded in 2010, we pride ourselves on fostering a culture of innovation, collaboration, and continuous learning.",
+            "section": "Welcome & Basics"
+        },
+        {
+            "id": "mission",
+            "title": "Our Mission & Values",
+            "icon": "🎯",
+            "content": "Our mission is to empower businesses through intelligent technology solutions. Core values: Excellence, Integrity, Innovation, Collaboration, Customer Focus.",
+            "section": "Welcome & Basics"
+        },
+        {
+            "id": "culture",
+            "title": "Company Culture",
+            "icon": "🤝",
+            "content": "A collaborative, inclusive workplace emphasizing work-life balance, professional development, and open communication.",
+            "section": "Welcome & Basics"
+        }
+    ],
+    "Policies & Compliance": [
+        {
+            "id": "security",
+            "title": "Security Policies",
+            "icon": "🔒",
+            "content": "Core security practices: strong passwords, MFA, credential protection, immediate incident reporting, and annual mandatory training.",
+            "section": "Policies & Compliance"
+        },
+        {
+            "id": "code-of-conduct",
+            "title": "Code of Conduct",
+            "icon": "📋",
+            "content": "Professional and ethical behavior is required; confidential reporting channels are available for concerns.",
+            "section": "Policies & Compliance"
+        },
+        {
+            "id": "data-privacy",
+            "title": "Data Privacy & GDPR",
+            "icon": "🛡️",
+            "content": "We comply with GDPR, CCPA; handle customer data carefully and report breaches immediately.",
+            "section": "Policies & Compliance"
+        }
+    ],
+    "Benefits & Time-Off": [
+        {
+            "id": "health-benefits",
+            "title": "Health & Wellness Benefits",
+            "icon": "💪",
+            "content": "Comprehensive coverage includes medical, dental, vision, plus wellness programs and mental health support.",
+            "section": "Benefits & Time-Off"
+        },
+        {
+            "id": "timeoff",
+            "title": "Time-Off Procedures",
+            "icon": "🏖️",
+            "content": "Full-time employees receive 20 PTO days plus 10 holidays; submit PTO via HR portal with 2-week notice.",
+            "section": "Benefits & Time-Off"
+        },
+        {
+            "id": "professional-development",
+            "title": "Professional Development",
+            "icon": "📚",
+            "content": "Tuition reimbursement, conference support, mentoring, and online learning resources are available.",
+            "section": "Benefits & Time-Off"
+        }
+    ],
+    "Getting Started": [
+        {
+            "id": "first-week",
+            "title": "First Week Safety Course",
+            "icon": "🦺",
+            "content": (
+                "Welcome to the First Week Safety Course. This course has 3 modules with practical tasks.\n\n"
+                "Module 1 - Safety Basics:\n  - Section 1: Workplace hazards and awareness\n  - Section 2: PPE overview\n  - Section 3: Safe work practices and ergonomics\n\n"
+                "Module 2 - Emergency Procedures:\n  - Section 1: Fire safety and evacuation\n  - Section 2: First aid and incident reporting\n  - Section 3: Spill response and containment\n\n"
+                "Module 3 - Equipment & Techniques:\n  - Section 1: Equipment operation basics\n  - Section 2: Lockout/Tagout overview\n  - Section 3: Techniques for safe task execution\n\n"
+                "Course Tasks (demo):\n"
+                "- Task A: Moving a loaded crate (techniques: \"two-person-lift\", \"mechanical-dolly\", \"body-mechanics\")\n"
+                "- Task B: Operating a small powered hand tool (techniques: \"two-handed-grip\", \"stabilize-and-cut\", \"slow-pass\")\n"
+                "- Task C: Lifting/positioning equipment (techniques: \"mechanical-assist\", \"team-lift\", \"lift-with-knees\")\n\n"
+                "Log in with the demo account: username: KingHack password: 12345. The system records techniques and scores, and recommends techniques you perform best with in future tasks."
+            ),
+            "section": "Getting Started"
+        },
+        {
+            "id": "it-setup",
+            "title": "IT & Tools Setup",
+            "icon": "💻",
+            "content": "IT setup includes laptop, email, VPN, cloud storage, communication tools, and security tools. IT support available via ticketing.",
+            "section": "Getting Started"
+        },
+        {
+            "id": "team-intro",
+            "title": "Meet Your Team",
+            "icon": "👥",
+            "content": "Introductions to your manager, teammates, and key cross-functional contacts. Regular team meetings and mentorship available.",
+            "section": "Getting Started"
+        }
+    ]
+}
+
+# Server-side test definitions for sections (short lessons + quiz)
+TEST_DEFINITIONS = {
+    'first-week': {
+        'lesson': 'Quick safety overview: PPE, check route, use mechanical assists when possible.',
+        'techniques': ['two-person-lift','mechanical-dolly','body-mechanics'],
+        'quiz': {
+            'type': 'mcq',
+            'question': 'When moving a heavy crate, the safest first step is:',
+            'options': ['Lift immediately', 'Plan the route and use equipment if available', 'Ask someone to guess'],
+            'correct_index': 1
+        }
+    },
+    'overview': {
+        'lesson': 'Company founded in 2010 with a focus on enterprise solutions and innovation.',
+        'techniques': ['visual','textual','scenario'],
+        'quiz': {
+            'type': 'mcq',
+            'question': 'What year was the company founded?',
+            'options': ['2005','2010','2015'],
+            'correct_index': 1
+        }
+    },
+    'security': {
+        'lesson': 'Security best practices: use MFA, strong passwords, and report suspicious activity.',
+        'techniques': ['policy-first','example-driven','interactive-demo'],
+        'quiz': {
+            'type': 'mcq',
+            'question': 'Which of these is recommended for account protection?',
+            'options': ['Share passwords','Use MFA','Use simple passwords'],
+            'correct_index': 1
+        }
+    },
+    'it-setup': {
+        'lesson': 'IT setup includes email, VPN, and required security tools; connect to VPN for remote work.',
+        'techniques': ['step-by-step','video','checklist'],
+        'quiz': {
+            'type': 'mcq',
+            'question': 'When working remotely you should:',
+            'options': ['Avoid VPN','Use VPN for secure access','Turn off security tools'],
+            'correct_index': 1
+        }
+    },
+    'team-intro': {
+        'lesson': 'Meet your manager, know your team meeting cadence, and find your mentor.',
+        'techniques': ['narrative','bullet-points','role-play'],
+        'quiz': {
+            'type': 'mcq',
+            'question': 'When are regular team meetings held?',
+            'options': ['Never','Every Monday at 10 AM','Only yearly'],
+            'correct_index': 1
+        }
+    }
+}
+
+# Examples of other question types
+TEST_DEFINITIONS.update({
+    'scenario-example': {
+        'lesson': 'Scenario: You find a small spill in a hallway. Decide how to respond.',
+        'techniques': ['scenario','visual'],
+        'quiz': {
+            'type': 'scenario',
+            'steps': [
+                {
+                    'id': 's1',
+                    'prompt': 'You notice a small liquid spill near a door. What do you do first?',
+                    'options': [
+                        {'text': 'Ignore it and walk around', 'next': 's2_ignore'},
+                        {'text': 'Block the area and notify maintenance', 'next': 's2_block'},
+                        {'text': 'Try to clean it immediately without PPE', 'next': 's2_clean'}
+                    ]
+                },
+                {
+                    'id': 's2_block',
+                    'prompt': 'You blocked the area and notified maintenance. What next?',
+                    'options': [
+                        {'text': 'Wait for maintenance and assist if asked', 'result': {'score': 100, 'feedback': 'Excellent safety-first response.'}},
+                        {'text': 'Attempt to clean it yourself immediately', 'result': {'score': 60, 'feedback': 'Risky without PPE.'}}
+                    ]
+                },
+                {
+                    'id': 's2_clean',
+                    'prompt': 'You tried to clean without PPE and slipped slightly. What now?',
+                    'options': [
+                        {'text': 'Report incident and seek assistance', 'result': {'score': 80, 'feedback': 'Better to report and get help.'}},
+                        {'text': 'Keep working and ignore it', 'result': {'score': 40, 'feedback': 'Unsafe choice.'}}
+                    ]
+                },
+                {
+                    'id': 's2_ignore',
+                    'prompt': 'You ignored the spill; someone later slips. What should you have done?',
+                    'options': [
+                        {'text': 'Block and report it', 'result': {'score': 30, 'feedback': 'Delayed but correct acknowledgement.'}}
+                    ]
+                }
+            ],
+            'start_step': 's1'
+        }
+    },
+    'fill-blank-example': {
+        'lesson': 'Fill in the blank: Multi-factor authentication abbreviation is ___.',
+        'techniques': ['textual'],
+        'quiz': {
+            'type': 'fill_blank',
+            'prompt': 'MFA stands for ___',
+            'answers': ['multi-factor authentication','multi factor authentication','mfa']
+        }
+    },
+    'short-answer-example': {
+        'lesson': 'Short answer: Describe one benefit of using a VPN.',
+        'techniques': ['textual','short-answer'],
+        'quiz': {
+            'type': 'short_answer',
+            'prompt': 'Describe one benefit of using a VPN in two sentences or less.',
+            'keywords': ['encrypt','security','privacy','secure']
+        }
+    },
+    'true-false-example': {
+        'lesson': 'True or False: You should share your password with your manager.',
+        'techniques': ['policy-first'],
+        'quiz': {
+            'type': 'true_false',
+            'prompt': 'You should share your password with your manager.',
+            'answer': False
+        }
+    },
+    'ordering-example': {
+        'lesson': 'Order the steps to safely lift a box.',
+        'techniques': ['body-mechanics'],
+        'quiz': {
+            'type': 'ordering',
+            'prompt': 'Place these steps in correct order (top to bottom):',
+            'items': ['Bend knees','Position feet','Lift with legs','Keep back straight'],
+            'correct_order': ['Position feet','Bend knees','Keep back straight','Lift with legs']
+        }
+    },
+    'ranking-example': {
+        'lesson': 'Rank the hazards by risk (highest to lowest).',
+        'techniques': ['risk-assessment'],
+        'quiz': {
+            'type': 'ranking',
+            'prompt': 'Rank these hazards from highest risk to lowest:',
+            'items': ['Live electrical work','Working at height','Cluttered walkway','Office noise'],
+            'correct_order': ['Live electrical work','Working at height','Cluttered walkway','Office noise']
+        }
+    }
+})
+
+# Matching example: pair left/right items without exposing correct pairs to the client
+TEST_DEFINITIONS.update({
+    'matching-example': {
+        'lesson': 'Match items to their correct counterparts (e.g., PPE item → purpose).',
+        'techniques': ['visual','matching'],
+        'quiz': {
+            'type': 'matching',
+            'prompt': 'Match the PPE item to its main purpose:',
+            'left_items': ['Gloves','Safety glasses','Steel-toe boots','Hi-vis vest'],
+            'right_items': ['Protect feet','Increase visibility','Protect hands','Protect eyes'],
+            # Authoritative correct pairs (kept server-side only)
+            'correct_pairs': {
+                'Gloves': 'Protect hands',
+                'Safety glasses': 'Protect eyes',
+                'Steel-toe boots': 'Protect feet',
+                'Hi-vis vest': 'Increase visibility'
+            }
+        }
+    }
+})
+
+# Server-side task definitions for cards (manager-assigned to-dos)
+TASK_DEFINITIONS = {
+    'first-week': [
+        {
+            'id': 'fw-task-1',
+            'title': 'Complete safety orientation',
+            'description': 'Attend the 1-hour safety orientation and acknowledge completion in the portal.',
+            'posted_date': '2026-01-05',
+            'due_date': '2026-01-12',
+            'important': True,
+            # When this module is completed, mark task done automatically
+            'module_id': 'module1'
+        },
+        {
+            'id': 'fw-task-2',
+            'title': 'PPE checklist verification',
+            'description': 'Verify you have required PPE and upload a photo of assigned PPE badge.',
+            'posted_date': '2026-01-05',
+            'due_date': '2026-01-10',
+            'important': False,
+            'module_id': 'module1'
+        },
+        {
+            'id': 'fw-task-3',
+            'title': 'Route planning for heavy lifts',
+            'description': 'Walk the planned route for material handling and note hazards; submit comments if any.',
+            'posted_date': '2026-01-06',
+            'due_date': '2026-01-13',
+            'important': True,
+            'module_id': 'module3'
+        }
+    ]
+}
+
+
+@app.route('/api/tasks/<card_id>')
+def get_tasks(card_id):
+    """Return tasks for a given card (with completed flag per-user)."""
+    tasks = TASK_DEFINITIONS.get(card_id, [])
+    username = session.get('username')
+    completed = []
+    if username:
+        ensure_user_stats(username)
+        completed = user_stats[username].get('completed_tasks', []) or []
+
+    # Annotate tasks with completed flag
+    annotated = []
+    for t in tasks:
+        at = t.copy()
+        at['completed'] = t['id'] in completed
+        annotated.append(at)
+
+    return jsonify({'success': True, 'card_id': card_id, 'tasks': annotated})
+
+
+@app.route('/api/tasks/complete', methods=['POST'])
+def complete_task():
+    """Mark a task complete for the current user."""
+    username = session.get('username')
+    if not username:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+    data = request.get_json(force=True, silent=True) or {}
+    task_id = data.get('task_id')
+    card_id = data.get('card_id')
+    if not task_id:
+        return jsonify({'success': False, 'error': 'task_id required'}), 400
+
+    ensure_user_stats(username)
+    completed = user_stats[username].get('completed_tasks')
+    if task_id in completed:
+        return jsonify({'success': True, 'task_id': task_id, 'already_completed': True})
+
+    completed.append(task_id)
+    # Optionally, record into modules as a lightweight completion record
+    mods = user_stats[username]['modules']
+    mods.setdefault('tasks', {'completions': []})
+    mods['tasks']['completions'].append({'task_id': task_id, 'card_id': card_id, 'timestamp': datetime.now().isoformat()})
+
+    # Persist changes
+    try:
+        save_user_stats(username)
+    except Exception:
+        pass
+
+    return jsonify({'success': True, 'task_id': task_id})
+
+
+
+def record_result(username, module_id, section_id, score, mistakes, techniques):
+    """Record a result into in-memory stats and optionally write memories to Backboard."""
+    ensure_user_stats(username)
+    mods = user_stats[username]['modules']
+    if module_id not in mods:
+        mods[module_id] = {'completions': []}
+    mods[module_id]['completions'].append({'section': section_id, 'score': score, 'mistakes': mistakes, 'techniques': techniques, 'timestamp': datetime.now().isoformat()})
+
+    t_scores = user_stats[username]['technique_scores']
+    for t in techniques:
+        if t not in t_scores:
+            t_scores[t] = []
+        if isinstance(score, (int, float)):
+            t_scores[t].append(score)
+
+    # If a learning style was passed (embedded in techniques as a special marker), handle it.
+    # Expectation: callers may pass a single learning style via the 'techniques' list by including
+    # a dict-like marker or via a dedicated optional parameter in future. For now, check for
+    # a string like 'style:flashcards' in techniques and record it separately.
+    try:
+        # record any learning-style markers of form 'style:<name>'
+        lstyle_scores = user_stats[username].setdefault('learning_style_scores', {})
+        for item in techniques:
+            if isinstance(item, str) and item.startswith('style:'):
+                lname = item.split(':', 1)[1]
+                if lname not in lstyle_scores:
+                    lstyle_scores[lname] = []
+                if isinstance(score, (int, float)):
+                    lstyle_scores[lname].append(score)
+    except Exception:
+        pass
+
+    # Update preferred_style dynamically using recent performance
+    try:
+        l_scores = user_stats[username].get('learning_style_scores', {})
+        def recent_avg(scores, window=3):
+            if not scores:
+                return None
+            return sum(scores[-window:]) / min(len(scores), window)
+
+        recent_avgs = {s: recent_avg(vals) for s, vals in l_scores.items() if vals}
+        if recent_avgs:
+            # pick the style with best recent average
+            pref = max(recent_avgs.items(), key=lambda x: (x[1] if x[1] is not None else 0))[0]
+            # only switch preference if it's meaningfully better than alternatives
+            best_score = recent_avgs.get(pref, 0) or 0
+            others = [v for k, v in recent_avgs.items() if k != pref and v is not None]
+            second_best = max(others) if others else 0
+            # require at least a small margin to switch, and prefer stable high scores
+            if best_score >= 70 or (best_score - second_best) >= 5:
+                user_stats[username]['preferred_style'] = pref
+    except Exception as e:
+        print('Error updating preferred_style:', e)
+
+    # Write memories to Backboard if configured
+    if BACKBOARD_CONFIG.get('enabled') and AI_CONFIG.get('use_backboard_api') and assistant_id:
+        try:
+            api_key = BACKBOARD_CONFIG.get('api_key')
+            headers = {"X-API-Key": api_key}
+            base_url = BACKBOARD_CONFIG.get('base_url')
+            # Record mistakes
+            if MEMORY_OPTIONS.get('record_mistakes', True) and mistakes:
+                for m in mistakes:
+                    mem = {'title': f"Mistake in {module_id}/{section_id}", 'text': f"User: {username}\nModule: {module_id}\nSection: {section_id}\nMistake: {m}"}
+                    requests.post(f"{base_url}/assistants/{assistant_id}/memories", json=mem, headers=headers, timeout=BACKBOARD_CONFIG.get('timeout', 30))
+            # Preferred technique summary
+            if MEMORY_OPTIONS.get('record_preferred_techniques', True) and t_scores:
+                averages = {t: (sum(scores) / len(scores)) for t, scores in t_scores.items() if scores}
+                if averages:
+                    best = max(averages.items(), key=lambda x: x[1])
+                    mem = {'title': f"Preferred technique: {best[0]}", 'text': f"User: {username}\nPreferred technique: {best[0]}\nAvg score: {best[1]:.2f}"}
+                    requests.post(f"{base_url}/assistants/{assistant_id}/memories", json=mem, headers=headers, timeout=BACKBOARD_CONFIG.get('timeout', 30))
+        except Exception as e:
+            print('memory write error (record_result):', e)
+
+    # After recording results, auto-complete any manager tasks tied to this module/section
+    try:
+        # Iterate over tasks and mark those matching this module_id as completed for the user
+        for card_tasks in TASK_DEFINITIONS.values():
+            for t in card_tasks:
+                tid = t.get('id')
+                linked_module = t.get('module_id')
+                # If task is associated with this module, mark it completed
+                if linked_module and linked_module == module_id:
+                    ensure_user_stats(username)
+                    completed = user_stats[username].setdefault('completed_tasks', [])
+                    if tid not in completed:
+                        completed.append(tid)
+    except Exception as e:
+        print('Error auto-completing tasks in record_result:', e)
+    # Persist user stats
+    try:
+        save_user_stats(username)
+    except Exception:
+        pass
+
+
+@app.route('/api/section/test/<card_id>')
+def section_test(card_id):
+    """Return the lesson and quiz for a given card (without revealing the correct answer)."""
+    if card_id not in TEST_DEFINITIONS:
+        return jsonify({'success': False, 'error': 'No test for this section'}), 404
+
+    username = session.get('username')
+    # compute recommended technique similarly to module_next but scoped to available techniques
+    techniques = TEST_DEFINITIONS[card_id].get('techniques', [])
+    recommended = None
+    exploration = False
+    if username:
+        ensure_user_stats(username)
+        t_scores = user_stats[username].get('technique_scores', {})
+        averages = {t: (sum(scores) / len(scores)) for t, scores in t_scores.items() if scores}
+        import random
+        explore_rate = 0.2
+        exploration = random.random() < explore_rate
+        if not exploration and averages:
+            avail_avg = {t: averages.get(t, 0) for t in techniques}
+            recommended = max(avail_avg.items(), key=lambda x: x[1])[0]
+        if not recommended:
+            recommended = random.choice(techniques) if techniques else None
+
+    # Sanitize quiz before returning to client to avoid leaking answers/results
+    import copy
+    raw_quiz = copy.deepcopy(TEST_DEFINITIONS[card_id]['quiz'])
+    qtype = raw_quiz.get('type', 'mcq')
+    safe_quiz = {}
+    if qtype == 'mcq':
+        safe_quiz['type'] = 'mcq'
+        safe_quiz['question'] = raw_quiz.get('question')
+        safe_quiz['options'] = raw_quiz.get('options', [])
+    elif qtype == 'true_false':
+        safe_quiz['type'] = 'true_false'
+        safe_quiz['prompt'] = raw_quiz.get('prompt')
+    elif qtype == 'fill_blank':
+        safe_quiz['type'] = 'fill_blank'
+        safe_quiz['prompt'] = raw_quiz.get('prompt')
+    elif qtype == 'short_answer':
+        safe_quiz['type'] = 'short_answer'
+        safe_quiz['prompt'] = raw_quiz.get('prompt')
+        # do not expose keywords
+    elif qtype in ('ordering', 'ranking'):
+        safe_quiz['type'] = qtype
+        safe_quiz['prompt'] = raw_quiz.get('prompt')
+        safe_quiz['items'] = raw_quiz.get('items', [])
+    elif qtype == 'scenario':
+        # Build a steps structure but strip any terminal result details
+        safe_quiz['type'] = 'scenario'
+        safe_quiz['start_step'] = raw_quiz.get('start_step')
+        steps = []
+        for s in raw_quiz.get('steps', []):
+            step = {'id': s.get('id'), 'prompt': s.get('prompt'), 'options': []}
+            for opt in s.get('options', []):
+                # include text and next if present; do NOT include internal 'result'
+                step['options'].append({'text': opt.get('text'), 'next': opt.get('next') if opt.get('next') else None})
+            steps.append(step)
+        safe_quiz['steps'] = steps
+    elif qtype == 'matching':
+        safe_quiz['type'] = 'matching'
+        safe_quiz['prompt'] = raw_quiz.get('prompt')
+        # expose left/right items but not the authoritative pairs
+        safe_quiz['left_items'] = raw_quiz.get('left_items', [])
+        safe_quiz['right_items'] = raw_quiz.get('right_items', [])
+    else:
+        # Fallback: return question and options if present
+        for k in ('question','prompt','options','items'):
+            if k in raw_quiz:
+                safe_quiz[k] = raw_quiz[k]
+
+    resp = {
+        'success': True,
+        'card_id': card_id,
+        'lesson': TEST_DEFINITIONS[card_id]['lesson'],
+        'quiz': safe_quiz,
+        'techniques': techniques,
+        'recommended': recommended,
+        'exploration': exploration
+    }
+    return jsonify(resp)
+
+
+@app.route('/api/section/submit', methods=['POST'])
+def section_submit():
+    """Accept quiz submissions for sections, grade them, record results and return feedback."""
+    username = session.get('username')
+    if not username:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+    data = request.get_json(force=True, silent=True) or {}
+    card_id = data.get('card_id')
+    chosen_tech = data.get('technique')
+
+    if card_id not in TEST_DEFINITIONS:
+        return jsonify({'success': False, 'error': 'Unknown card_id'}), 400
+
+    test = TEST_DEFINITIONS[card_id]['quiz']
+    qtype = test.get('type', 'mcq')
+
+    score = 0
+    mistakes = []
+    feedback = ''
+
+    # Evaluate based on question type
+    try:
+        if qtype == 'mcq':
+            chosen_index = int(data.get('chosen_index', -1))
+            correct_index = int(test.get('correct_index', -1))
+            correct = (chosen_index == correct_index)
+            score = 90 if correct else 65
+            if not correct:
+                mistakes.append('Incorrect quiz answer')
+            feedback = 'Correct' if correct else 'Incorrect'
+
+        elif qtype == 'true_false':
+            given = data.get('answer')
+            expected = bool(test.get('answer', False))
+            correct = (bool(given) == expected)
+            score = 100 if correct else 50
+            if not correct:
+                mistakes.append('Incorrect (true/false)')
+            feedback = 'Correct' if correct else 'Incorrect'
+
+        elif qtype == 'fill_blank':
+            given = (data.get('text') or '').strip().lower()
+            answers = [a.strip().lower() for a in test.get('answers', [])]
+            correct = given in answers
+            score = 100 if correct else 50
+            if not correct:
+                mistakes.append('Answer did not match expected fill-in responses')
+            feedback = 'Matched' if correct else 'Did not match'
+
+        elif qtype == 'short_answer':
+            text = (data.get('text') or '').lower()
+            keywords = [k.lower() for k in test.get('keywords', [])]
+            # simple keyword matching
+            hits = sum(1 for k in keywords if k in text)
+            # proportion of keywords matched determines score
+            score = int(50 + (50 * (hits / max(1, len(keywords)))))
+            if hits == 0:
+                mistakes.append('Answer did not include expected keywords')
+            feedback = f'Keywords matched: {hits}/{len(keywords)}'
+
+        elif qtype in ('ordering', 'ranking'):
+            given = data.get('order', [])
+            correct_order = test.get('correct_order', [])
+            # compute position matches
+            correct_positions = sum(1 for i, itm in enumerate(given) if i < len(correct_order) and itm == correct_order[i])
+            total = max(len(correct_order), 1)
+            score = int(50 + (50 * (correct_positions / total)))
+            if correct_positions != total:
+                mistakes.append(f'{correct_positions}/{total} in correct positions')
+            feedback = f'{correct_positions}/{total} correct positions'
+
+        elif qtype == 'scenario':
+            # scenario evaluation: client should submit the chosen path (list of option indices or texts)
+            path = data.get('path')
+            if isinstance(path, list) and path:
+                # Walk the scenario defined in TEST_DEFINITIONS to compute the result
+                try:
+                    scenario = TEST_DEFINITIONS[card_id]['quiz']
+                    steps_map = {s['id']: s for s in scenario.get('steps', [])}
+                    current = scenario.get('start_step')
+                    final_result = None
+                    for choice in path:
+                        step = steps_map.get(current)
+                        if not step:
+                            break
+                        options = step.get('options', [])
+                        # choice can be index or exact text
+                        opt = None
+                        if isinstance(choice, int) and 0 <= choice < len(options):
+                            opt = options[choice]
+                        else:
+                            # match by text
+                            for o in options:
+                                if o.get('text') == choice:
+                                    opt = o
+                                    break
+                        if not opt:
+                            break
+                        # If this option has 'result' in the authoritative definition, capture it
+                        # (we read from original TEST_DEFINITIONS which contains 'result')
+                        original_step = next((s for s in scenario.get('steps', []) if s.get('id') == current), None)
+                        if original_step:
+                            orig_opt = original_step.get('options', [])[options.index(opt)] if options.index(opt) < len(original_step.get('options', [])) else None
+                            if orig_opt and orig_opt.get('result'):
+                                final_result = orig_opt.get('result')
+                                break
+                        # advance to next
+                        current = opt.get('next')
+                    if final_result and isinstance(final_result, dict):
+                        score = int(final_result.get('score', 60))
+                        feedback = final_result.get('feedback', '')
+                        if score < 80:
+                            mistakes.append('Suboptimal scenario choice')
+                    else:
+                        score = 60
+                        mistakes.append('Scenario ended without clear result')
+                except Exception as e:
+                    print('Error evaluating scenario path:', e)
+                    score = 60
+                    mistakes.append('Scenario eval error')
+            else:
+                # fallback
+                score = 60
+                mistakes.append('No scenario path submitted')
+
+        elif qtype == 'matching':
+            # Expect payload: pairs mapping left->right choices, or array of {left,right}
+            pairs = data.get('pairs') or {}
+            # normalize to dict
+            pairs_map = {}
+            if isinstance(pairs, list):
+                for p in pairs:
+                    if isinstance(p, dict):
+                        l = p.get('left')
+                        r = p.get('right')
+                        if l is not None:
+                            pairs_map[l] = r
+            elif isinstance(pairs, dict):
+                pairs_map = pairs
+
+            correct_pairs = test.get('correct_pairs', {})
+            total = max(len(correct_pairs), 1)
+            correct_count = 0
+            for l, correct_r in correct_pairs.items():
+                chosen = pairs_map.get(l)
+                if chosen == correct_r:
+                    correct_count += 1
+            score = int(50 + (50 * (correct_count / total)))
+            if correct_count != total:
+                mistakes.append(f'{correct_count}/{total} correct matches')
+            feedback = f'{correct_count}/{total} matches correct'
+
+        else:
+            score = 60
+            mistakes.append('Unknown question type')
+    except Exception as e:
+        print('Error evaluating submission:', e)
+        score = 50
+        mistakes.append('Evaluation error')
+
+    techniques = [chosen_tech] if chosen_tech else []
+    # record
+    record_result(username, module_id=card_id, section_id=card_id, score=score, mistakes=mistakes, techniques=techniques)
+
+    resp = {'success': True, 'score': score, 'mistakes': mistakes, 'feedback': feedback}
+    return jsonify(resp)
+
+
+
+def get_ai_insights_from_backboard(card_id, card_content):
+    """Get AI insights from Backboard API"""
+    global assistant_id, thread_id
+    
+    if not backboard_api_ready or not assistant_id or not thread_id:
+        return None
+    
+    try:
+        api_key = BACKBOARD_CONFIG['api_key']
+        headers = {"X-API-Key": api_key}
+        base_url = BACKBOARD_CONFIG['base_url']
+        
+        # Prepare the prompt for AI
+        prompt = f"""Based on the following company information, provide:
+1. A concise 1-2 sentence summary
+2. 4-6 key points (as a list)
+3. Related topics that might be helpful
+
+Company Information:
+{card_content}
+
+Please format your response as JSON with keys: "summary", "key_points" (array), and "related_topics" (array of topic names)."""
+        
+        # Send message to thread (with memory)
+        response = requests.post(
+            f"{base_url}/threads/{thread_id}/messages",
+            headers=headers,
+            data={
+                "content": prompt,
+                "stream": "false",
+                "memory": "Auto"
+            },
+            timeout=BACKBOARD_CONFIG['timeout']
+        )
+        
+        if response.status_code != 200:
+            print(f"⚠️  API request failed: {response.status_code}")
+            return None
+        
+        response_data = response.json()
+        ai_response = response_data.get("content", "")
+        
+        # Parse the response
+        try:
+            # Try to extract JSON from the response
+            import re
+            json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
+            if json_match:
+                insights = json.loads(json_match.group())
+                return insights
+        except:
+            pass
+        
+        # If JSON parsing fails, create structured response from text
+        return {
+            "summary": ai_response[:200] + "..." if len(ai_response) > 200 else ai_response,
+            "key_points": [p.strip() for p in ai_response.split('\n') if p.strip() and len(p) < 100][:6],
+            "related_topics": []
+        }
+        
+    except Exception as e:
+        print(f"⚠️  Error getting AI insights: {e}")
+        return None
+
+# Pre-generated fallback insights (for when API is unavailable)
+AI_INSIGHTS = {
+    "overview": {
+        "summary": "The company is a global tech innovator established in 2010 with 5,000+ employees, specializing in enterprise solutions and fostering innovation, collaboration, and learning.",
+        "key_points": ["Founded in 2010", "Global presence", "5,000+ employees", "Enterprise solutions", "Culture of innovation"],
+        "related_cards": ["mission", "culture"]
+    },
+    "mission": {
+        "summary": "Five core values drive the company: Excellence in quality, Integrity in ethics, Innovation in thinking, Collaboration in teamwork, and Customer Focus in service delivery.",
+        "key_points": ["Excellence", "Integrity", "Innovation", "Collaboration", "Customer Focus"],
+        "related_cards": ["overview", "culture", "code-of-conduct"]
+    },
+    "culture": {
+        "summary": "A collaborative, inclusive workplace emphasizing work-life balance, professional growth, open communication, with regular events, mentorship, and learning opportunities for all.",
+        "key_points": ["Collaborative environment", "Work-life balance", "Professional development", "Mentorship programs", "Diversity valued"],
+        "related_cards": ["mission", "overview", "professional-development"]
+    },
+    "security": {
+        "summary": "Core security practices include strong passwords, multi-factor authentication, credential protection, immediate incident reporting, computer security, and annual mandatory training.",
+        "key_points": ["Strong passwords (12+ chars)", "Multi-factor authentication", "Never share credentials", "Report suspicious activity", "Annual training required"],
+        "related_cards": ["data-privacy", "code-of-conduct"]
+    },
+    "code-of-conduct": {
+        "summary": "Professional and ethical behavior is required, including respectful treatment, confidentiality, anti-discrimination, and zero-tolerance for harassment with confidential reporting options.",
+        "key_points": ["Professional conduct", "Respectful workplace", "Zero-tolerance harassment", "Confidentiality required", "Confidential reporting available"],
+        "related_cards": ["security", "culture"]
+    },
+    "data-privacy": {
+        "summary": "GDPR and CCPA compliance is mandatory, requiring careful customer data handling, restricted access, immediate breach reporting, and quarterly audits with purposeful processing.",
+        "key_points": ["GDPR/CCPA compliant", "Restricted data access", "Immediate breach reporting", "Quarterly audits", "Purposeful data processing"],
+        "related_cards": ["security", "code-of-conduct"]
+    },
+    "health-benefits": {
+        "summary": "Comprehensive coverage includes medical, dental, vision, gym discounts, mental health support, health screenings, and wellness programs with company covering 80% of premiums.",
+        "key_points": ["Medical, dental, vision coverage", "80% company-funded", "Wellness programs", "Mental health support", "Annual health fairs"],
+        "related_cards": ["professional-development", "timeoff"]
+    },
+    "timeoff": {
+        "summary": "Full-time employees receive 20 PTO days plus 10 holidays annually, requiring 2-week advance notice via HR portal, with up to 5 days annual carryover and separate personal days.",
+        "key_points": ["20 PTO days + 10 holidays", "2-week advance notice", "Up to 5 days carryover", "Personal days separate", "48-hour notice for personal days"],
+        "related_cards": ["health-benefits", "professional-development"]
+    },
+    "professional-development": {
+        "summary": "Growth opportunities include $3,000 annual tuition reimbursement, conference support, mentorship programs, LinkedIn Learning, Coursera access, and sponsored certifications.",
+        "key_points": ["$3,000 annual tuition reimbursement", "Conference support", "Mentorship available", "LinkedIn Learning & Coursera", "Certification sponsorship"],
+        "related_cards": ["health-benefits", "first-week", "culture"]
+    },
+    "first-week": {
+        "summary": "Week 1 includes team meeting (Day 1), company orientation (Days 2-3), department training and shadowing (Days 4-5), with manager schedules and mentor assignment by week's end.",
+        "key_points": ["Day 1: IT setup & team meeting", "Days 2-3: Company orientation", "Days 4-5: Department training", "Shadowing included", "Mentor assigned"],
+        "related_cards": ["it-setup", "team-intro", "professional-development"]
+    },
+    "it-setup": {
+        "summary": "Day 1 setup provides laptop, email, VPN, cloud storage, communication tools, project management software, and security tools, completed in 2-3 hours with 24/7 IT support available.",
+        "key_points": ["Laptop pre-configured", "Email & VPN access", "Cloud storage provided", "Communication tools included", "24/7 IT support"],
+        "related_cards": ["first-week", "security"]
+    },
+    "team-intro": {
+        "summary": "Meet manager, teammates, and key contacts with weekly Monday meetings, monthly team lunches, organized Slack channels, open communication, and diverse backgrounds.",
+        "key_points": ["Weekly team meetings", "Monthly lunches", "Slack channels organized", "Open communication", "Diverse backgrounds"],
+        "related_cards": ["first-week", "culture"]
+    }
+}
+
+
+def get_user_thread(username: str):
+    """Return or create a Backboard thread for the given username."""
+    global user_threads, assistant_id, backboard_api_ready
+    if not username:
+        return None
+
+    # Return existing thread if present
+    if username in user_threads:
+        return user_threads[username]
+
+    # Try to create a thread for the user if Backboard is available
+    if not backboard_api_ready or not assistant_id or not BACKBOARD_CONFIG.get('enabled', False):
+        return None
+
+    try:
+        api_key = BACKBOARD_CONFIG['api_key']
+        headers = {"X-API-Key": api_key}
+        base_url = BACKBOARD_CONFIG['base_url']
+
+        resp = requests.post(
+            f"{base_url}/assistants/{assistant_id}/threads",
+            json={"username": username},
+            headers=headers,
+            timeout=BACKBOARD_CONFIG.get('timeout', 30)
+        )
+
+        if resp.status_code == 200:
+            tid = resp.json().get('thread_id')
+            if tid:
+                user_threads[username] = tid
+                return tid
+    except Exception as e:
+        print(f"⚠️ Error creating user thread: {e}")
+    return None
+
+
+def ensure_user_stats(username: str):
+    """Ensure in-memory stats structure exists for user."""
+    if username not in user_stats:
+        user_stats[username] = {
+            'modules': {},
+            'technique_scores': {},
+            # Track per-learning-style performance (e.g., 'flashcards','visual','textual')
+            'learning_style_scores': {},
+            # Track completed task ids for todo functionality
+            'completed_tasks': [],
+            # Currently preferred learning style for this user (dynamically adjusted)
+            'preferred_style': None,
+            # Track method feedback history and aggregated scores
+            'method_feedback': [],
+            'method_scores': {}
+        }
+
+
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    """Simple demo login using DEMO_USER credentials."""
+    data = request.get_json(force=True, silent=True) or request.form or {}
+    username = data.get('username')
+    password = data.get('password')
+
+    if not username or not password:
+        return jsonify({'success': False, 'error': 'Missing credentials'}), 400
+
+    if username == DEMO_USER.get('username') and password == DEMO_USER.get('password'):
+        # Successful auth: set session but do NOT echo credentials back to client.
+        session['username'] = username
+        ensure_user_stats(username)
+        # Create per-user thread if Backboard is available (do not log credentials)
+        if BACKBOARD_CONFIG.get('enabled') and AI_CONFIG.get('use_backboard_api'):
+            try:
+                get_user_thread(username)
+            except Exception:
+                pass
+        return jsonify({'success': True})
+
+    return jsonify({'success': False, 'error': 'Invalid credentials'}), 401
+
+
+@app.route('/api/logout', methods=['POST'])
+def api_logout():
+    session.pop('username', None)
+    return jsonify({'success': True})
+
+
+@app.route('/api/module/complete', methods=['POST'])
+def module_complete():
+    """Record module completion, mistakes, and techniques; optionally write memories to Backboard."""
+    username = session.get('username')
+    if not username:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+    payload = request.get_json(force=True, silent=True) or {}
+    module_id = payload.get('module_id')
+    section_id = payload.get('section_id')
+    score = payload.get('score')
+    mistakes = payload.get('mistakes', []) or []
+    techniques = payload.get('techniques', []) or []
+
+    ensure_user_stats(username)
+
+    # Update module stats
+    mods = user_stats[username]['modules']
+    if module_id not in mods:
+        mods[module_id] = {'completions': []}
+    mods[module_id]['completions'].append({
+        'section': section_id,
+        'score': score,
+        'mistakes': mistakes,
+        'techniques': techniques,
+        'timestamp': datetime.now().isoformat()
+    })
+
+    # Update technique scores
+    t_scores = user_stats[username]['technique_scores']
+    for t in techniques:
+        if t not in t_scores:
+            t_scores[t] = []
+        if isinstance(score, (int, float)):
+            t_scores[t].append(score)
+
+    # Write memories to Backboard if configured
+    if BACKBOARD_CONFIG.get('enabled') and AI_CONFIG.get('use_backboard_api'):
+        api_key = BACKBOARD_CONFIG['api_key']
+        headers = {"X-API-Key": api_key}
+        base_url = BACKBOARD_CONFIG['base_url']
+        tid = get_user_thread(username) or thread_id
+
+        # Record mistakes as memories
+        if MEMORY_OPTIONS.get('record_mistakes', True) and mistakes:
+            try:
+                for m in mistakes:
+                    mem = {
+                        'title': f"Mistake in {module_id}/{section_id}",
+                        'text': f"User: {username}\nModule: {module_id}\nSection: {section_id}\nMistake: {m}",
+                    }
+                    requests.post(
+                        f"{base_url}/assistants/{assistant_id}/memories",
+                        json=mem,
+                        headers=headers,
+                        timeout=BACKBOARD_CONFIG.get('timeout', 30)
+                    )
+            except Exception as e:
+                print(f"⚠️ Error recording mistake memory: {e}")
+
+        # Update preferred technique memory based on averages
+        if MEMORY_OPTIONS.get('record_preferred_techniques', True) and t_scores:
+            try:
+                # Compute average scores
+                averages = {t: (sum(scores) / len(scores)) for t, scores in t_scores.items() if scores}
+                if averages:
+                    best = max(averages.items(), key=lambda x: x[1])
+                    technique_name, technique_score = best
+                    mem = {
+                        'title': f"Preferred technique: {technique_name}",
+                        'text': f"User: {username}\nPreferred technique: {technique_name}\nAvg score: {technique_score:.2f}",
+                    }
+                    requests.post(
+                        f"{base_url}/assistants/{assistant_id}/memories",
+                        json=mem,
+                        headers=headers,
+                        timeout=BACKBOARD_CONFIG.get('timeout', 30)
+                    )
+            except Exception as e:
+                print(f"⚠️ Error recording technique memory: {e}")
+
+    # Auto-complete any manager tasks tied to this module
+    try:
+        for card_tasks in TASK_DEFINITIONS.values():
+            for t in card_tasks:
+                if t.get('module_id') and t.get('module_id') == module_id:
+                    ensure_user_stats(username)
+                    comp = user_stats[username].setdefault('completed_tasks', [])
+                    if t['id'] not in comp:
+                        comp.append(t['id'])
+                        # also record a lightweight tasks completion in modules
+                        mods = user_stats[username]['modules']
+                        mods.setdefault('tasks', {'completions': []})
+                        mods['tasks']['completions'].append({'task_id': t['id'], 'card_id': module_id, 'timestamp': datetime.now().isoformat()})
+    except Exception as e:
+        print('Error auto-completing tasks in module_complete:', e)
+
+    # Persist user stats after module completion
+    try:
+        save_user_stats(username)
+    except Exception:
+        pass
+
+    return jsonify({'success': True, 'module_id': module_id})
+
+
+    # Note: unreachable (kept for readability)
+
+
+@app.route('/api/course/status')
+def course_status():
+    """Return per-user technique averages and a recommended technique."""
+    username = session.get('username')
+    if not username:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+    ensure_user_stats(username)
+    t_scores = user_stats[username].get('technique_scores', {})
+    averages = {t: (sum(scores) / len(scores)) for t, scores in t_scores.items() if scores}
+
+    # Learning-style averages (recent-weighted)
+    l_scores = user_stats[username].get('learning_style_scores', {})
+    def recent_avg(scores, window=5):
+        if not scores:
+            return None
+        window = min(window, len(scores))
+        return sum(scores[-window:]) / len(scores[-window:])
+
+    l_averages = {s: recent_avg(vals) for s, vals in l_scores.items() if vals}
+
+    # Preferred style (dynamically computed earlier)
+    preferred = user_stats[username].get('preferred_style')
+
+    return jsonify({
+        'success': True,
+        'preferred_style': preferred,
+        'technique_averages': averages,
+        'learning_style_averages': l_averages
+    })
+
+
+@app.route('/api/module/next')
+def module_next():
+    """Select the teaching technique for the requested module using user memory/stats.
+
+    Selection uses local stats when available and falls back to a simple exploration strategy.
+    Returns chosen technique and whether this was an exploratory pick.
+    """
+    username = session.get('username')
+    if not username:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+    module_id = request.args.get('module_id')
+    if not module_id:
+        return jsonify({'success': False, 'error': 'module_id required'}), 400
+
+    # Define available techniques per module (server-side canonical mapping)
+    MODULE_TECHNIQUES = {
+        'module1': ['two-person-lift','mechanical-dolly','body-mechanics'],
+        'module2': ['two-handed-grip','stabilize-and-cut','slow-pass'],
+        'module3': ['mechanical-assist','team-lift','lift-with-knees']
+    }
+
+    techniques = MODULE_TECHNIQUES.get(module_id)
+    if not techniques:
+        return jsonify({'success': False, 'error': 'unknown module_id'}), 400
+
+    ensure_user_stats(username)
+
+    # Build averages from local stats
+    t_scores = user_stats[username].get('technique_scores', {})
+    averages = {t: (sum(scores) / len(scores)) for t, scores in t_scores.items() if scores}
+
+    # Build learning-style averages too (if available) and consider preferred_style
+    l_scores = user_stats[username].get('learning_style_scores', {})
+    # compute recent-weighted averages (prefer recent performance)
+    def recent_avg(scores, window=5):
+        if not scores:
+            return None
+        window = min(window, len(scores))
+        recent = scores[-window:]
+        return sum(recent) / len(recent)
+
+    l_averages = {s: recent_avg(scores) for s, scores in l_scores.items() if scores}
+
+    # Choose technique by epsilon-greedy: mostly exploit (80%), sometimes explore (20%)
+    import random
+    explore_rate = 0.2
+    exploration = random.random() < explore_rate
+
+    chosen = None
+    if not exploration and averages:
+        # filter to techniques available for this module
+        avail_avg = {t: averages.get(t, 0) for t in techniques}
+        # pick best average (ties resolved by highest average)
+        chosen = max(avail_avg.items(), key=lambda x: x[1])[0]
+
+    if not chosen:
+        # either exploration or no historical data — pick randomly from module techniques
+        chosen = random.choice(techniques)
+
+    # Choose recommended learning style for this module based on user's learning-style averages
+    recommended_style = None
+    MODULE_STYLE_MAP = {
+        'module1': ['flashcards','visual','textual'],
+        'module2': ['flashcards','video','interactive'],
+        'module3': ['flashcards','hands-on','visual']
+    }
+    supported_styles = MODULE_STYLE_MAP.get(module_id, list(l_averages.keys()) or [])
+
+    # If the user performed poorly on flashcards for the previous module, prefer a matching-style activity
+    PREV_MODULE = {'module2': 'module1', 'module3': 'module2'}
+    prev_mod = PREV_MODULE.get(module_id)
+    try:
+        if prev_mod:
+            prev_comps = user_stats[username].get('modules', {}).get(prev_mod, {}).get('completions', [])
+            flash_scores = []
+            for c in prev_comps:
+                techniques = c.get('techniques') or []
+                for t in techniques:
+                    if isinstance(t, str) and (t.startswith('style:flash') or 'flash' in t.lower() or 'flashcard' in t.lower()):
+                        if isinstance(c.get('score'), (int, float)):
+                            flash_scores.append(c.get('score'))
+                        break
+            # Note: fallback to aggregated learning_style_scores if no module-specific flashcard markers
+            if not flash_scores:
+                flash_scores = user_stats[username].get('learning_style_scores', {}).get('flashcards', [])
+            if flash_scores:
+                avg_flash = sum(flash_scores) / len(flash_scores)
+                if avg_flash < 65:
+                    # prioritize matching style to change approach
+                    if 'matching' not in supported_styles:
+                        supported_styles = ['matching'] + supported_styles
+                        recommended_style = 'matching'
+                        # and prefer a matching method
+                        recommended_method = 'matching'
+    except Exception:
+        pass
+
+    # Prefer user's current preferred_style if it's relevant and performing well
+    pref = user_stats[username].get('preferred_style')
+    if pref and pref in supported_styles and pref in l_averages and not exploration:
+        # use preferred if its recent avg is reasonable
+        if l_averages.get(pref, 0) >= 65:
+            recommended_style = pref
+
+    if not recommended_style:
+        if not exploration and l_averages:
+            avail_style_avg = {s: l_averages.get(s, 0) for s in supported_styles}
+            try:
+                recommended_style = max(avail_style_avg.items(), key=lambda x: x[1])[0]
+            except Exception:
+                recommended_style = supported_styles[0] if supported_styles else None
+        else:
+            if supported_styles:
+                recommended_style = random.choice(supported_styles)
+
+    # Recommend a teaching/explanation method based on past method feedback
+    recommended_method = None
+    method_scores = user_stats[username].get('method_scores', {})
+    if method_scores and not exploration:
+        # compute averages
+        try:
+            m_averages = {m: (sum(vals)/len(vals)) for m, vals in method_scores.items() if vals}
+            if m_averages:
+                # pick best method that contains any of the supported style keywords
+                recommended_method = max(m_averages.items(), key=lambda x: x[1])[0]
+        except Exception:
+            recommended_method = None
+
+
+    # Record the selection to memory (Backboard) if available, but do not store the actual technique name
+    if BACKBOARD_CONFIG.get('enabled') and AI_CONFIG.get('use_backboard_api') and assistant_id:
+        try:
+            api_key = BACKBOARD_CONFIG.get('api_key')
+            headers = {"X-API-Key": api_key}
+            base_url = BACKBOARD_CONFIG.get('base_url')
+            mem = {
+                'title': f"Technique selection recorded for {username}",
+                'text': f"User: {username}\nModule: {module_id}\nA technique was selected (exploration={exploration})"
+            }
+            requests.post(f"{base_url}/assistants/{assistant_id}/memories", json=mem, headers=headers, timeout=BACKBOARD_CONFIG.get('timeout', 30))
+        except Exception as e:
+            print('memory write error (selection):', e)
+
+    # Do not return the chosen technique to the client to avoid revealing the 'answer'.
+    return jsonify({'success': True, 'module_id': module_id, 'exploration': exploration, 'recommended_style': recommended_style, 'recommended_method': recommended_method})
+
+
+@app.route('/api/feedback', methods=['POST'])
+def api_feedback():
+    """Record user feedback on teaching/explanation method for a given card/topic."""
+    username = session.get('username')
+    if not username:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+    data = request.get_json(force=True, silent=True) or {}
+    card_id = data.get('card_id')
+    method = data.get('method')
+    rating = data.get('rating')
+    notes = data.get('notes', '')
+
+    if not card_id or not method or rating is None:
+        return jsonify({'success': False, 'error': 'card_id, method, and rating are required'}), 400
+
+    try:
+        ensure_user_stats(username)
+        entry = {
+            'card_id': card_id,
+            'method': method,
+            'rating': int(rating),
+            'notes': notes,
+            'timestamp': datetime.now().isoformat()
+        }
+        user_stats[username].setdefault('method_feedback', []).append(entry)
+
+        # Update aggregated method scores
+        ms = user_stats[username].setdefault('method_scores', {})
+        if method not in ms:
+            ms[method] = []
+        ms[method].append(int(rating))
+
+        # Optionally update preferred_style if method maps to a learning style
+        # Simple mapping: if method name contains known style keywords
+        style_map = {
+            'visual': 'visual',
+            'video': 'visual',
+            'analogy': 'textual',
+            'step-by-step': 'textual',
+            'example': 'textual',
+            'real-world': 'textual',
+            'flashcard': 'flashcards',
+            'hands-on': 'hands-on'
+        }
+        for k, v in style_map.items():
+            if k in method.lower():
+                # push into learning_style_scores for tracking
+                l_scores = user_stats[username].setdefault('learning_style_scores', {})
+                l_scores.setdefault(v, []).append(int(rating))
+                # update preferred_style based on recent averages
+                try:
+                    # compute averages and pick best
+                    averages = {s: (sum(vals)/len(vals)) for s, vals in l_scores.items() if vals}
+                    if averages:
+                        pref = max(averages.items(), key=lambda x: x[1])[0]
+                        user_stats[username]['preferred_style'] = pref
+                except Exception:
+                    pass
+                break
+
+        # persist
+        try:
+            save_user_stats(username)
+        except Exception:
+            pass
+
+        return jsonify({'success': True, 'entry': entry})
+    except Exception as e:
+        print('Error saving feedback:', e)
+        return jsonify({'success': False, 'error': 'internal error'}), 500
+
+@app.route('/')
+def index():
+    """Render the main onboarding board."""
+    # Compute which cards have startable content (tests or tasks)
+    startable = set()
+    try:
+        startable.update(TEST_DEFINITIONS.keys())
+    except Exception:
+        pass
+    try:
+        startable.update(TASK_DEFINITIONS.keys())
+    except Exception:
+        pass
+
+    return render_template('index.html', board=ONBOARDING_BOARD, startable_cards=list(startable))
+
+@app.route('/api/board')
+def get_board():
+    """API endpoint to fetch the complete board."""
+    return jsonify(ONBOARDING_BOARD)
+
+@app.route('/api/card/<card_id>')
+def get_card(card_id):
+    """API endpoint to fetch a specific card's content."""
+    for section_cards in ONBOARDING_BOARD.values():
+        for card in section_cards:
+            if card['id'] == card_id:
+                return jsonify(card)
+    return jsonify({"error": "Card not found"}), 404
+
+@app.route('/api/insights/<card_id>')
+def get_insights(card_id):
+    """API endpoint to fetch AI-generated insights for a card (using Backboard API)."""
+    try:
+        # Find the card content
+        card_content = None
+        for section_cards in ONBOARDING_BOARD.values():
+            for card in section_cards:
+                if card['id'] == card_id:
+                    card_content = card['content']
+                    break
+        
+        if not card_content:
+            return jsonify({"error": "Card not found"}), 404
+        
+        # Try to get insights from Backboard API first
+        if backboard_api_ready:
+            api_insights = get_ai_insights_from_backboard(card_id, card_content)
+            if api_insights:
+                return jsonify({
+                    "card_id": card_id,
+                    "insights": api_insights,
+                    "timestamp": datetime.now().isoformat(),
+                    "ai_source": "Backboard API",
+                    "ai_note": "This AI-assisted content is generated by analyzing official company content. It provides learning support only and does not replace official company policies."
+                })
+        
+        # Fall back to pre-generated insights
+        if card_id in AI_INSIGHTS:
+            return jsonify({
+                "card_id": card_id,
+                "insights": AI_INSIGHTS[card_id],
+                "timestamp": datetime.now().isoformat(),
+                "ai_source": "Pre-generated (API unavailable)",
+                "ai_note": "This AI-assisted content is for learning support only and does not replace official company policies."
+            })
+        
+        return jsonify({"error": "No insights available for this card"}), 404
+        
+    except Exception as e:
+        print(f"Error in get_insights: {e}")
+        # Fall back to pre-generated
+        if card_id in AI_INSIGHTS:
+            return jsonify({
+                "card_id": card_id,
+                "insights": AI_INSIGHTS[card_id],
+                "timestamp": datetime.now().isoformat(),
+                "ai_source": "Pre-generated (fallback)",
+                "ai_note": "This AI-assisted content is for learning support only."
+            })
+        return jsonify({"error": "Error retrieving insights"}), 500
+
+@app.route('/api/related/<card_id>')
+def get_related_cards(card_id):
+    """API endpoint to fetch related cards for deeper learning."""
+    if card_id in AI_INSIGHTS:
+        related_ids = AI_INSIGHTS[card_id]["related_cards"]
+        related_cards = []
+        
+        for section_cards in ONBOARDING_BOARD.values():
+            for card in section_cards:
+                if card['id'] in related_ids:
+                    related_cards.append({
+                        "id": card['id'],
+                        "title": card['title'],
+                        "icon": card['icon'],
+                        "section": card['section']
+                    })
+        
+        return jsonify({"related_cards": related_cards})
+    return jsonify({"related_cards": []}), 404
+
+@app.route('/api/status')
+def get_status():
+    """API endpoint to check API status."""
+    return jsonify({
+        "app_name": APP_CONFIG.get('app_name', 'Onboarding'),
+        "version": APP_CONFIG.get('version', '1.0'),
+        "backboard_api_enabled": BACKBOARD_CONFIG['enabled'],
+        "backboard_api_ready": backboard_api_ready,
+        "ai_assistant_id": assistant_id,
+        "timestamp": datetime.now().isoformat()
+    })
+
+if __name__ == '__main__':
+    print("🚀 AI-Enhanced Onboarding Application Starting...")
+    print("📊 Backboard-style layout with AI learning enhancements")
+    print("🤖 AI features: Summaries, Key Points, Related Topics")
+    
+    # Initialize Backboard API
+    if BACKBOARD_CONFIG['enabled']:
+        print("\n🔌 Initializing Backboard API...")
+        initialize_backboard_api()
+    else:
+        print("\n⚠️  Backboard API is disabled. Using pre-generated insights.")
+        print("    To enable: Set BACKBOARD_CONFIG['enabled'] = True in config.py")
+
+    # Load persisted user stats if present
+    try:
+        load_all_user_stats()
+        print('✅ Loaded persisted user stats')
+    except Exception as e:
+        print('⚠️ Could not load persisted user stats:', e)
+    
+    print("\n📍 Navigate to http://localhost:5000")
+    print("📊 Use /api/status to check API status\n")
+    
+    app.run(debug=True, port=5000)
