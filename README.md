@@ -232,7 +232,7 @@ The application supports multiple learning styles:
 - **Quick Learners**: AI summaries provide rapid overview
 - **Detail Learners**: Full content and key points provide depth
 
-## 🚀 Future Enhancement Ideas
+##  Future Enhancement Ideas
 
 - Real AI API integration (OpenAI, Claude, etc.)
 - User progress tracking and completion badges
@@ -260,4 +260,5 @@ Free to use and customize for educational and internal training purposes.
 **Built with for effective, responsible AI-assisted employee onboarding**
 
  **Welcome to the team!** 
+
 
